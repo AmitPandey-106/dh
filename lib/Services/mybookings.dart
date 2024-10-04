@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'basescaffold.dart';
+import '../Navigation/basescaffold.dart';
 import 'booking_detail_page.dart'; // Import the booking detail page
 
 class MyBooking extends StatefulWidget {
@@ -10,8 +11,7 @@ class MyBooking extends StatefulWidget {
 }
 
 class _MyBookingState extends State<MyBooking> {
-  List<Map<String, dynamic>> bookings =
-  []; // List to store all bookings with details
+  List<Map<String, dynamic>> bookings = []; // List to store all bookings with details
   bool isLoading = true; // Flag to show loading indicator
 
   // Map for storing specific image URLs for each service provider
@@ -47,58 +47,74 @@ class _MyBookingState extends State<MyBooking> {
     final userPhoneNumber = prefs.getString('userPhoneNumber');
 
     if (userPhoneNumber != null) {
-      final databaseRef =
-      FirebaseDatabase.instance.ref('serviceBooking/$userPhoneNumber');
+      final databaseRef = FirebaseDatabase.instance.ref('serviceBooking/$userPhoneNumber');
       try {
         final snapshot = await databaseRef.get();
 
         if (snapshot.exists) {
           final data = snapshot.value as Map<Object?, Object?>?;
+
           if (data != null) {
             bookings.clear(); // Clear previous data before adding new entries
 
             // Loop through each booking entry
             for (var entry in data.entries) {
-              final bookingID = entry.key;
               final booking = entry.value as Map<Object?, Object?>?;
-              final servicesDetails =
-              booking?['servicesDetails'] as Map<Object?, Object?>?;
-              final cost = booking?['cost'] as Map<Object?, Object?>?;
 
-              if (servicesDetails != null && cost != null) {
-                final services = servicesDetails['services'] as List<dynamic>?;
-                final serviceTime = servicesDetails['serviceTime'] as String?;
-                final serviceDate = servicesDetails['serviceDate'] as String?;
-                final totalAmount = cost['totalAmount'] as int?;
-                final bookingTime = booking?['bookingTime'] as String?;
-                final serviceProvider = booking?['service_provider'] as String?;
+              if (booking != null) {
+                // Retrieve bookingTime and cancelBooking
+                final bookingTime = booking['bookingTime'] as String?;
+                final isCancelled = booking['cancelBooking'] as bool? ?? false;
 
-                // Get the specific image URL from the map
-                String imageUrl =
-                    serviceProviderImageUrls[serviceProvider ?? ''] ?? '';
+                // Retrieve services details and cost
+                final servicesDetails = booking['servicesDetails'] as Map<Object?, Object?>?;
+                final cost = booking['cost'] as Map<Object?, Object?>?;
 
-                if (services != null &&
-                    totalAmount != null &&
-                    bookingTime != null) {
-                  bookings.add({
-                    'bookingTime': bookingTime,
-                    'totalAmount': totalAmount,
-                    'serviceTime': serviceTime,
-                    'serviceDate': serviceDate,
-                    'services': services,
-                    'serviceProvider': serviceProvider,
-                    'imageUrl': imageUrl, // Use the static image URL
-                  });
+                if (servicesDetails != null && cost != null) {
+                  final services = servicesDetails['services'] as List<dynamic>?;
+
+                  // Extract additional details
+                  final serviceTime = servicesDetails['serviceTime'] as String?;
+                  final serviceDate = servicesDetails['serviceDate'] as String?;
+                  final totalAmount = cost['totalAmount'] as int?;
+                  final serviceProvider = booking['service_provider'] as String?;
+
+                  // Get the specific image URL from the map
+                  String imageUrl = serviceProviderImageUrls[serviceProvider ?? ''] ?? '';
+
+                  // Add booking data to the list if all required data is available
+                  if (services != null && totalAmount != null && bookingTime != null) {
+                    bookings.add({
+                      'bookingTime': bookingTime,
+                      'totalAmount': totalAmount,
+                      'serviceTime': serviceTime,
+                      'serviceDate': serviceDate,
+                      'services': services,
+                      'serviceProvider': serviceProvider,
+                      'imageUrl': imageUrl, // Use the static image URL
+                      'isCancelled': isCancelled, // Include the cancelBooking status
+                    });
+                  }
                 }
               }
             }
+
+            // Sort bookings by status and then by service date and time
+            // Sort allBookings by status and bookingTime
+            bookings.sort((a, b) {
+              int statusComparison = _compareStatus(a['isCancelled'], a['isPending'], b['isCancelled'], b['isPending']);
+              if (statusComparison != 0) return statusComparison;
+
+              // Sort by bookingTime if statuses are equal
+              return a['bookingTime'].compareTo(b['bookingTime']);
+            });
 
             setState(() {
               isLoading = false; // Data fetched, stop loading
             });
 
-            // Log the bookings for debugging
-            print("Bookings: $bookings");
+            // Log the sorted bookings for debugging
+            print("Sorted Bookings: $bookings");
           } else {
             setState(() {
               bookings = [];
@@ -124,6 +140,13 @@ class _MyBookingState extends State<MyBooking> {
     }
   }
 
+  int _compareStatus(bool isCancelledA, bool isPendingA, bool isCancelledB, bool isPendingB) {
+    if (isPendingA && !isPendingB) return -1; // A is pending, B is not
+    if (!isPendingA && isPendingB) return 1;  // B is pending, A is not
+    if (isCancelledA && !isCancelledB) return 1; // A is cancelled, B is not
+    if (!isCancelledA && isCancelledB) return -1; // B is cancelled, A is not
+    return 0; // Both have the same status (either both done or both not cancelled)
+  }
   @override
   Widget build(BuildContext context) {
     return BaseScaffold(
@@ -162,8 +185,11 @@ class _MyBookingState extends State<MyBooking> {
                     totalCost: (booking['totalAmount'] as int?)
                         ?.toDouble() ??
                         0.0,
-                    bookingTime: '',
+                    bookingTime:
+                    booking['bookingTime'] as String? ?? '',
                     services: [],
+                    showCancelButton: true,
+                      isCancelled: booking['isCancelled'],
                   ),
                 ),
               );
@@ -172,9 +198,11 @@ class _MyBookingState extends State<MyBooking> {
               serviceProvider: booking['serviceProvider'],
               bookingTime: booking['bookingTime'],
               serviceTime: booking['serviceTime'],
+                serviceDate: booking['serviceDate'],
               totalCost: booking['totalAmount'].toDouble(),
               imageUrl: booking[
-              'imageUrl'], // Use the image URL from bookings
+              'imageUrl'],
+                isCancelled: booking['isCancelled'],// Use the image URL from bookings
             ),
           );
         },
@@ -195,6 +223,8 @@ class BookingCard extends StatelessWidget {
   final String serviceTime;
   final double totalCost;
   final String imageUrl;
+  final String serviceDate;
+  final bool isCancelled;
 
   BookingCard({
     required this.serviceProvider,
@@ -202,10 +232,17 @@ class BookingCard extends StatelessWidget {
     required this.serviceTime,
     required this.totalCost,
     required this.imageUrl,
+    required this.serviceDate,
+    required this.isCancelled,
   });
 
   @override
   Widget build(BuildContext context) {
+    DateTime serviceDateTime = DateFormat("yyyy-MM-dd HH:mm").parse(serviceDate + " "+serviceTime);
+    DateTime now = DateTime.now();
+    bool isPending = now.isBefore(serviceDateTime);
+    print(serviceDateTime);
+    print(now);
     return Card(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10.0),
@@ -216,33 +253,6 @@ class BookingCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Service Provider: $serviceProvider',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  Text('Booking Time: $bookingTime'),
-                  SizedBox(height: 8),
-                  Text('Service Time: $serviceTime'),
-                  SizedBox(height: 8),
-                  Text(
-                    'Total Cost: ₹$totalCost',
-                    style: TextStyle(
-                      color: Colors.green,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(width: 16),
             Container(
               decoration: BoxDecoration(
                 border: Border.all(
@@ -260,6 +270,47 @@ class BookingCard extends StatelessWidget {
                   height: 110,
                   fit: BoxFit.cover,
                 ),
+              ),
+            ),
+            SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      isCancelled ? "Cancelled" : isPending ? "Pending" : "Done",
+                      style: TextStyle(
+                        color: isCancelled
+                            ? Colors.red // Red color for "Cancelled"
+                            : isPending
+                            ? Colors.green // Green color for "Pending"
+                            : Colors.grey, // Grey color for "Done"
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    'Service Provider: $serviceProvider',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text('Booking Time: $bookingTime'),
+                  SizedBox(height: 8),
+                  Text('Service D & T: $serviceDate $serviceTime'),
+                  SizedBox(height: 8),
+                  Text(
+                    'Total Cost: ₹$totalCost',
+                    style: TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

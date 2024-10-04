@@ -390,6 +390,7 @@ class _BillSummaryPageState extends State<BillSummaryPage> {
                       'membershipCharge': widget.membershipCharge,
                     },
                     'clothingType': widget.clothingType,
+                    'cancelBooking': false,
                   }).then((_) async {
                     if (await _isPermissionGranted()) {
                       _sendMessage(

@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
-import '../basescaffold.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../Navigation/basescaffold.dart';
+import '../Services/booking_detail_page.dart';
+import '../Services/mybookings.dart';
 
 class AdminAllBooking extends StatefulWidget {
   @override
@@ -40,67 +44,83 @@ class _AdminAllBookingState extends State<AdminAllBooking> {
   }
 
   Future<void> _fetchAllBookings() async {
-    final databaseRef = FirebaseDatabase.instance.ref('serviceBooking');
-
     try {
+      final databaseRef = FirebaseDatabase.instance.ref('serviceBooking');
       final snapshot = await databaseRef.get();
+
       if (snapshot.exists) {
         final data = snapshot.value as Map<Object?, Object?>?;
+
         if (data != null) {
           allBookings.clear(); // Clear previous data before adding new entries
 
-          // Loop through each booking entry
-          data.forEach((userPhoneNumber, bookingsData) {
-            final bookingsList = bookingsData as Map<Object?, Object?>?;
+          // Loop through each user's bookings
+          for (var userEntry in data.entries) {
+            final userPhoneNumber = userEntry.key as String?;
+            final userBookings = userEntry.value as Map<Object?, Object?>?;
 
-            bookingsList?.forEach((bookingID, bookingDetails) {
-              final booking = bookingDetails as Map<Object?, Object?>?;
-              final servicesDetails =
-              booking != null && booking['servicesDetails'] is Map
-                  ? booking['servicesDetails'] as Map
-                  : null;
-              final cost = booking != null && booking['cost'] is Map
-                  ? booking['cost'] as Map
-                  : null;
+            if (userPhoneNumber != null && userBookings != null) {
+              // Loop through each booking for the current user
+              for (var bookingEntry in userBookings.entries) {
+                final booking = bookingEntry.value as Map<Object?, Object?>?;
+                print("Booking for $userPhoneNumber: $booking");
 
-              if (servicesDetails != null && cost != null) {
-                final services =
-                    servicesDetails['services'] as List<dynamic>? ?? [];
-                final serviceTime =
-                    servicesDetails['serviceTime'] as String? ?? "N/A";
-                final serviceDate =
-                    servicesDetails['serviceDate'] as String? ?? "N/A";
-                final totalAmount = cost['totalAmount'] as int? ?? 0;
-                final bookingTime = booking?['bookingTime'] as String? ?? "N/A";
-                final serviceProvider =
-                    booking?['service_provider'] as String? ?? "Unknown";
+                if (booking != null) {
+                  // Retrieve bookingTime and cancelBooking
+                  final bookingTime = booking['bookingTime'] as String?;
+                  final isCancelled = booking['cancelBooking'] as bool? ?? false;
 
-                // Get the specific image URL for the service provider
-                String imageUrl =
-                    serviceProviderImageUrls[serviceProvider] ?? '';
+                  // Retrieve services details and cost
+                  final servicesDetails = booking['servicesDetails'] as Map<Object?, Object?>?;
+                  final cost = booking['cost'] as Map<Object?, Object?>?;
 
-                if (services.isNotEmpty &&
-                    totalAmount > 0 &&
-                    bookingTime.isNotEmpty) {
-                  setState(() {
-                    allBookings.add({
-                      'bookingTime': bookingTime,
-                      'totalAmount': totalAmount,
-                      'serviceTime': serviceTime,
-                      'serviceDate': serviceDate,
-                      'services': services,
-                      'serviceProvider': serviceProvider,
-                      'imageUrl': imageUrl, // Use the static image URL
-                    });
-                  });
+                  if (servicesDetails != null && cost != null) {
+                    final services = servicesDetails['services'] as List<dynamic>?;
+
+                    // Extract additional details
+                    final serviceTime = servicesDetails['serviceTime'] as String?;
+                    final serviceDate = servicesDetails['serviceDate'] as String?;
+                    final totalAmount = cost['totalAmount'] as int?;
+                    final serviceProvider = booking['service_provider'] as String?;
+
+                    // Get the specific image URL from the map
+                    String imageUrl = serviceProviderImageUrls[serviceProvider ?? ''] ?? '';
+
+                    // Add booking data to the list if all required data is available
+                    if (services != null && totalAmount != null && bookingTime != null) {
+                      allBookings.add({
+                        'userPhoneNumber': userPhoneNumber,
+                        'bookingTime': bookingTime,
+                        'totalAmount': totalAmount,
+                        'serviceTime': serviceTime,
+                        'serviceDate': serviceDate,
+                        'services': services,
+                        'serviceProvider': serviceProvider,
+                        'imageUrl': imageUrl, // Use the static image URL
+                        'isCancelled': isCancelled, // Include the cancelBooking status
+                      });
+                    }
+                  }
                 }
               }
-            });
+            }
+          }
+
+          // Sort allBookings by status and bookingTime
+          allBookings.sort((a, b) {
+            int statusComparison = _compareStatus(a['isCancelled'], a['isPending'], b['isCancelled'], b['isPending']);
+            if (statusComparison != 0) return statusComparison;
+
+            // Sort by bookingTime if statuses are equal
+            return a['bookingTime'].compareTo(b['bookingTime']);
           });
 
           setState(() {
             isLoading = false; // Data fetched, stop loading
           });
+
+          // Log the allBookings for debugging
+          print("allBookings: $allBookings");
         } else {
           setState(() {
             allBookings = [];
@@ -121,6 +141,15 @@ class _AdminAllBookingState extends State<AdminAllBooking> {
     }
   }
 
+// Helper function to compare statuses
+  int _compareStatus(bool isCancelledA, bool isPendingA, bool isCancelledB, bool isPendingB) {
+    if (isPendingA && !isPendingB) return -1; // A is pending, B is not
+    if (!isPendingA && isPendingB) return 1;  // B is pending, A is not
+    if (isCancelledA && !isCancelledB) return 1; // A is cancelled, B is not
+    if (!isCancelledA && isCancelledB) return -1; // B is cancelled, A is not
+    return 0; // Both have the same status (either both done or both not cancelled)
+  }
+
   @override
   Widget build(BuildContext context) {
     return BaseScaffold(
@@ -136,77 +165,48 @@ class _AdminAllBookingState extends State<AdminAllBooking> {
         itemBuilder: (context, index) {
           final booking = allBookings[index];
 
-          return Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10.0),
-            ),
-            elevation: 2,
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Service Provider: ${booking['serviceProvider']}',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                            'Booking Time: ${booking['bookingTime']}'),
-                        SizedBox(height: 8),
-                        Text(
-                            'Service Time: ${booking['serviceTime']}'),
-                        SizedBox(height: 8),
-                        Text(
-                          'Total Cost: ₹${booking['totalAmount']}',
-                          style: TextStyle(
-                            color: Colors.green,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
+          return GestureDetector(
+            onTap: () {
+              // Navigate to the detailed booking page
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => BookingDetailPage(
+                    serviceProvider:
+                    booking['serviceProvider'] as String? ?? '',
+                    selectedService: (booking['services']
+                    as List<dynamic>?)
+                        ?.map((service) =>
+                    service['name'] as String?)
+                        .where((name) =>
+                    name != null) // Filter out null names
+                        .join(", ") ??
+                        '', // Join service names
+                    serviceDate:
+                    booking['serviceDate'] as String? ?? '',
+                    serviceTime:
+                    booking['serviceTime'] as String? ?? '',
+                    totalCost: (booking['totalAmount'] as int?)
+                        ?.toDouble() ??
+                        0.0,
+                    bookingTime:
+                    booking['bookingTime'] as String? ?? '',
+                    services: [],
+                    showCancelButton: false,
+                      isCancelled:true,
                   ),
-                  SizedBox(width: 16),
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                          color: Colors.black,
-                          width: 2), // Border color and width
-                      borderRadius:
-                      BorderRadius.circular(10), // Border radius
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10.0),
-                      child: Image.network(
-                        alignment: Alignment.bottomRight,
-                        booking['imageUrl'].isEmpty
-                            ? 'https://via.placeholder.com/90'
-                            : booking['imageUrl'],
-                        width: 110,
-                        height: 110,
-                        fit: BoxFit.cover,
-                        errorBuilder: (BuildContext context,
-                            Object error, StackTrace? stackTrace) {
-                          return Image.network(
-                            'https://via.placeholder.com/90',
-                            width: 110,
-                            height: 110,
-                            fit: BoxFit.cover,
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              );
+            },
+            child: BookingCard(
+              serviceProvider: booking['serviceProvider'],
+              bookingTime: booking['bookingTime'],
+              serviceTime: booking['serviceTime'],
+                serviceDate: booking['serviceDate'],
+              totalCost: booking['totalAmount'].toDouble(),
+              imageUrl: booking[
+              'imageUrl'],
+              isCancelled: booking['isCancelled'],// Use the image URL from bookings
             ),
           );
         },

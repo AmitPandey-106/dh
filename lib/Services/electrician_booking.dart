@@ -388,6 +388,10 @@ class _ElectricianBookingPageState extends State<ElectricianBookingPage> {
                                   onChanged: (bool? isChecked) {
                                     setState(() {
                                       if (isChecked ?? false) {
+                                        if (_selectedMembership != null) {
+                                          _currentCharge -= _membershipPrices[
+                                          _selectedMembership]!;
+                                        }
                                         // A checkbox is selected
                                         _selectedMembership = option;
                                         _currentCharge +=
@@ -507,14 +511,31 @@ class _ElectricianBookingPageState extends State<ElectricianBookingPage> {
                   );
                 }).toList(),
               ),
-
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _showBill,
-              child: const Text('Show Bill'),
-            ),
             const SizedBox(height: 16),
           ],
+        ),
+      ),
+      bottomNavigationBar: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: SizedBox(
+          width: double.infinity, // Set the button width to full
+          child: ElevatedButton(
+            onPressed: _showBill,
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14.0),
+              backgroundColor: Colors.blueAccent, // Customize the button color
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(21.0), // Rounded corners
+              ),
+            ),
+            child: const Text(
+              'Proceed to Bill Summary',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ),
       ),
     );
